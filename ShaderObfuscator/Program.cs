@@ -22,8 +22,6 @@ public class Program
             string filename = Path.GetFileNameWithoutExtension(path).Replace("shaders_", "");
 
             byte[] bytes = File.ReadAllBytes(path);
-            bytes = bytes[4..]; // strip RBXS magic header
-
             byte[] compressed = compressor.Wrap(bytes).ToArray();
 
             Array.Reverse(compressed);
