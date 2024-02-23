@@ -1,27 +1,54 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
 using ZstdSharp;
 
-namespace ShaderObfuscator;
-
-public class Program
+namespace ShaderObfuscator
 {
-    private const int COMPRESSION_LEVEL = 22;
-    private const int XOR_KEY = 0xA8;
-
-    public static void Main(string[] args)
+    public class Program
     {
-        using var compressor = new Compressor(COMPRESSION_LEVEL);
-        string output = "";
+        private const string ShaderOutputArrayName = "gShaderPacks";
+        private const int COMPRESSION_LEVEL = 22;
+        private const int XOR_KEY = 0xA8;
 
-        foreach (string path in args)
+        public static void Main(string[] args)
         {
-            if (path == args[^1])
+            if (args.Length < 2)
             {
-                break;
+                Console.WriteLine("Usage: ShaderObfuscator <shader_file_paths> <output_file_path>");
+                return;
             }
 
-            string filename = Path.GetFileNameWithoutExtension(path).Replace("shaders_", "");
+            List<string> shaderFiles = args.Take(args.Length - 1).ToList();
+            string outputFilePath = args[^1];
 
+            StringBuilder arrays = new StringBuilder();
+            StringBuilder shaders = new StringBuilder();
+            shaders.AppendLine($"static const ShaderPackBytecode {ShaderOutputArrayName}[] = {{");
+
+            for (int i = 0; i < shaderFiles.Count; i++)
+            {
+                string path = shaderFiles[i];
+                string processedShader = ProcessShaderFile(path);
+
+                string encName = Rot13(Path.GetFileNameWithoutExtension(path));
+                string arrayName = $"a{i:0000}";
+
+                PrintBuffer(arrays, arrayName, processedShader);
+                shaders.AppendLine($"    {{ \"{encName}\", {arrayName}, {processedShader.Length} / 5 }},");
+            }
+
+            shaders.AppendLine("};");
+
+            File.WriteAllText(outputFilePath, arrays.ToString() + shaders.ToString());
+        }
+
+        private static string ProcessShaderFile(string path)
+        {
             byte[] bytes = File.ReadAllBytes(path);
+            using var compressor = new Compressor(COMPRESSION_LEVEL);
             byte[] compressed = compressor.Wrap(bytes).ToArray();
 
             Array.Reverse(compressed);
@@ -31,12 +58,22 @@ public class Program
                 compressed[i] ^= XOR_KEY;
             }
 
-            string pack = string.Join(", ", compressed.Select(b => $"0x{b:X2}"));
-            output += $"static const unsigned char {filename}[] = {{ {pack} }};\n";
+            return string.Join(", ", compressed.Select(b => $"0x{b:X2}"));
         }
 
-        output = output.Substring(0, output.Length - 1);
+        private static void PrintBuffer(StringBuilder arrays, string arrayName, string processedShader)
+        {
+            arrays.AppendLine($"static const unsigned char {arrayName}[] = {{ {processedShader} }};");
+        }
 
-        File.WriteAllText(args[^1], output);
+        private static string Rot13(string input)
+        {
+            return new string(input.Select(c => c switch
+            {
+                >= 'a' and <= 'z' => (char)('a' + (c - 'a' + 13) % 26),
+                >= 'A' and <= 'Z' => (char)('A' + (c - 'A' + 13) % 26),
+                _ => c
+            }).ToArray());
+        }
     }
 }
