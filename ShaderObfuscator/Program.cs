@@ -1,15 +1,16 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
 using ZstdSharp;
 
 namespace ShaderObfuscator
 {
+    struct ShaderPackBytecode
+    {
+        public byte[] Bytecode;
+        public int DataSize;
+    }
+
     public class Program
     {
-        private const string ShaderOutputArrayName = "gShaderPacks";
         private const int COMPRESSION_LEVEL = 22;
         private const int XOR_KEY = 0xA8;
 
@@ -17,63 +18,82 @@ namespace ShaderObfuscator
         {
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage: ShaderObfuscator <shader_file_paths> <output_file_path>");
+                Console.WriteLine("Usage: ShaderObfuscator <shader_folder_path> <output_file_path>");
                 return;
             }
 
-            List<string> shaderFiles = args.Take(args.Length - 1).ToList();
-            string outputFilePath = args[^1];
-
-            StringBuilder arrays = new StringBuilder();
-            StringBuilder shaders = new StringBuilder();
-            shaders.AppendLine($"static const ShaderPackBytecode {ShaderOutputArrayName}[] = {{");
-
-            for (int i = 0; i < shaderFiles.Count; i++)
+            string folder = args[0];
+            if (!Directory.Exists(folder))
             {
-                string path = shaderFiles[i];
-                string processedShader = ProcessShaderFile(path);
-
-                string encName = Rot13(Path.GetFileNameWithoutExtension(path));
-                string arrayName = $"a{i:0000}";
-
-                PrintBuffer(arrays, arrayName, processedShader);
-                shaders.AppendLine($"    {{ \"{encName}\", {arrayName}, {processedShader.Length} / 5 }},");
+                Console.WriteLine("Folder does not exist");
+                return;
             }
 
-            shaders.AppendLine("};");
+            string[] shaderFiles = Directory.GetFiles(folder, "*.pack");
+            if (shaderFiles.Length != 4)
+            {
+                Console.WriteLine("Folder does not contain the required files");
+                return;
+            }
 
-            File.WriteAllText(outputFilePath, arrays.ToString() + shaders.ToString());
+            if (!shaderFiles.Contains(Path.Combine(folder, "shaders_glsl3.pack")) ||
+                !shaderFiles.Contains(Path.Combine(folder, "shaders_glsles3.pack")) ||
+                !shaderFiles.Contains(Path.Combine(folder, "classic_shaders_glsl3.pack")) ||
+                !shaderFiles.Contains(Path.Combine(folder, "classic_shaders_glsles3.pack"))
+            )
+            {
+                Console.WriteLine("Folder does not contain the required files");
+                return;
+            }
+
+            string outputFilePath = args[1];
+
+            StringBuilder arrays = new();
+            StringBuilder dictionary = new();
+
+            string[] shaderNames = new string[] { "shaders_glsl3.pack", "shaders_glsles3.pack", "classic_shaders_glsl3.pack", "classic_shaders_glsles3.pack" };
+
+            for (int i = 0; i < shaderNames.Length; i++)
+            {
+                string shaderName = shaderNames[i];
+                string path = shaderFiles.First(file => Path.GetFileName(file) == shaderName);
+                ShaderPackBytecode shader = ObfuscateShaderPack(path);
+
+                string arrayName = $"a{i:0000}";
+
+                PrintBuffer(arrays, arrayName, string.Join(", ", shader.Bytecode.Select(b => $"0x{b:X2}")));
+                dictionary.AppendLine($"\t{{ {arrayName}, {shader.DataSize} }},");
+            }
+
+            dictionary.AppendLine("};");
+
+            File.WriteAllText(outputFilePath, arrays.ToString() + dictionary.ToString());
         }
 
-        private static string ProcessShaderFile(string path)
+        private static ShaderPackBytecode ObfuscateShaderPack(string path)
         {
             byte[] bytes = File.ReadAllBytes(path);
+
             using var compressor = new Compressor(COMPRESSION_LEVEL);
             byte[] compressed = compressor.Wrap(bytes).ToArray();
 
-            Array.Reverse(compressed);
-
-            for (var i = 0; i < compressed.Length; i++)
+            for (int i = 0; i < compressed.Length; i++)
             {
                 compressed[i] ^= XOR_KEY;
             }
 
-            return string.Join(", ", compressed.Select(b => $"0x{b:X2}"));
+            Array.Reverse(compressed);
+
+            return new ShaderPackBytecode
+            {
+                Bytecode = compressed,
+                DataSize = compressed.Length
+            };
         }
 
         private static void PrintBuffer(StringBuilder arrays, string arrayName, string processedShader)
         {
             arrays.AppendLine($"static const unsigned char {arrayName}[] = {{ {processedShader} }};");
-        }
-
-        private static string Rot13(string input)
-        {
-            return new string(input.Select(c => c switch
-            {
-                >= 'a' and <= 'z' => (char)('a' + (c - 'a' + 13) % 26),
-                >= 'A' and <= 'Z' => (char)('A' + (c - 'A' + 13) % 26),
-                _ => c
-            }).ToArray());
         }
     }
 }
