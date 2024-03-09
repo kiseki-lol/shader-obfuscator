@@ -12,7 +12,7 @@ namespace ShaderObfuscator
     public class Program
     {
         private const int COMPRESSION_LEVEL = 22;
-        private const int XOR_KEY = 0xA8;
+        private const long XOR_KEY = 0x5CAEC09A6E750D6C;
 
         public static void Main(string[] args)
         {
@@ -51,7 +51,9 @@ namespace ShaderObfuscator
             StringBuilder arrays = new();
             StringBuilder dictionary = new();
 
-            string[] shaderNames = new string[] { "shaders_glsl3.pack", "shaders_glsles3.pack", "classic_shaders_glsl3.pack", "classic_shaders_glsles3.pack" };
+            dictionary.AppendLine("static const ShaderPackBytecode gShaderPacks[] = {");
+
+            string[] shaderNames = ["shaders_glsl3.pack", "shaders_glsles3.pack", "classic_shaders_glsl3.pack", "classic_shaders_glsles3.pack"];
 
             for (int i = 0; i < shaderNames.Length; i++)
             {
@@ -77,17 +79,20 @@ namespace ShaderObfuscator
             using var compressor = new Compressor(COMPRESSION_LEVEL);
             byte[] compressed = compressor.Wrap(bytes).ToArray();
 
+            byte[] key = BitConverter.GetBytes(XOR_KEY);
+            byte[] encrypted = new byte[compressed.Length];
+
             for (int i = 0; i < compressed.Length; i++)
             {
-                compressed[i] ^= XOR_KEY;
+                encrypted[i] = (byte)(compressed[i] ^ key[i % key.Length]);
             }
 
-            Array.Reverse(compressed);
+            Array.Reverse(encrypted);
 
             return new ShaderPackBytecode
             {
-                Bytecode = compressed,
-                DataSize = compressed.Length
+                Bytecode = encrypted,
+                DataSize = encrypted.Length
             };
         }
 
